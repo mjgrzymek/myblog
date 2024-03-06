@@ -60,6 +60,7 @@ This produces a file `add.wasm` in binary format. To get a feel for how it works
 We import a function `print` from module `env`, then declare and export a function `add` that uses it.
 We also declare and export memory with initial 16 pages, in WebAssembly each page is 64KiB for a total of 1 MiB.
 As this is "heap" memory, we don't use it in this program.
+We can ignore the `__stack_pointer` for now, see [here](https://ziggit.dev/t/using-zig-with-webassembly/3478/3) for an explanation.
 You can learn more about the WAT format on [MDN](https://developer.mozilla.org/en-US/docs/WebAssembly/Understanding_the_text_format).
 
 To run it, we need an environment capable of using the exported function.
@@ -342,6 +343,7 @@ pages: 21
 
 Before the `reverseNamesNice` call we have just some stuff from the standard library written on page 16,
 and after we have our result at the beginning and more pages with some non-zero bytes.
+The "block" that was starting on page 16 merged with something written to the end of page 15.
 
 We can see the initial content in the WAT:
 
@@ -350,7 +352,6 @@ We can see the initial content in the WAT:
 ```
 
 The number `1048576` is exactly `2**16 * 16`, which is the beginning of page 16.
-I'm not sure why this seems to move to page 15 after the call.
 
 We can use `inspectMemory` to check that freeing is working properly:
 
@@ -493,4 +494,8 @@ addEventListener('message', async (event) => {
 Note that this is an overload of `instantiate` (see [MDN](https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/instantiate_static)),
 and `instance` is already what we previously got from `result.instance`.
 
-You can see the code for each section on [GitHub](https://github.com/MichalGrzymek/myblog/tree/main/public/zigwasm).
+---
+
+See the code examples on [GitHub](https://github.com/MichalGrzymek/myblog/tree/main/public/zigwasm).
+
+See discussion on [Ziggit](https://ziggit.dev/t/using-zig-with-webassembly/3478/1).
