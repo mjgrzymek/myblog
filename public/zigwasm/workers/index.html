@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>WebAssembly test</title>
+  </head>
+  <script type="module">
+    const worker = new Worker('worker.js', { type: 'module' });
+    worker.postMessage(7);
+    worker.postMessage(7);
+    worker.postMessage(7);
+    worker.postMessage(7);
+  </script>
+  <body></body>
+</html>
