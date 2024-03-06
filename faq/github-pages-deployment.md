@@ -7,13 +7,13 @@
 3. Modify `component/Image.tsx` to use the correct base path for the image source:
 
    ```tsx
-   import NextImage, { ImageProps } from 'next/image'
+   import NextImage, { ImageProps } from 'next/image';
 
    const Image = ({ src, ...rest }: ImageProps) => (
      <NextImage src={`/tailwind-nextjs-starter-blog${src}`} {...rest} />
-   )
+   );
 
-   export default Image
+   export default Image;
    ```
 
 4. To automate deployment, here's a Github action that you could use

@@ -1,0 +1,494 @@
+---
+title: Using Zig with WebAssembly
+date: '2024-03-05'
+tags: ['zig', 'wasm', 'web']
+draft: false
+summary: How to send numbers, strings, and arbitrary objects to Zig WASM
+---
+
+I just started on my Zig + WASM journey, and I had to go through a few incomplete or outdated resources before I figured it out to my satisfaction.
+So this is my attempt to compile it all into one place, it should work until anything in the world changes again 🙂.
+
+We will go through the basic setup with passing numbers to and from WASM, then I'll show the more complicated case of strings and finally objects (using JSON).
+
+## Adding numbers
+
+Let's start with the "Hello, world" of WASM—the `add` function.
+If we can add two numbers from WASM, we know that we set things up correctly.
+The same example is found in the [Zig Language Reference](https://ziglang.org/documentation/master/#WebAssembly).
+
+Create this file:
+
+```zig:add.zig
+extern fn print(i32) void;
+
+export fn add(a: i32, b: i32) void {
+    print(a + b);
+}
+```
+
+The compilation depends on the version of zig, for the latest release (v0.11) we have:
+
+```bash:zig11.sh
+zig build-lib add.zig -target wasm32-freestanding -dynamic --export=add -O ReleaseFast
+```
+
+In v0.12 this changes to
+
+```bash:zig12.sh
+zig build-exe add.zig -target wasm32-freestanding -fno-entry --export=add -O ReleaseFast
+```
+
+This produces a file `add.wasm` in binary format. To get a feel for how it works, I recommend looking at the human-readable **W**eb**A**ssembly **t**ext format with `wasm2wat add.wasm`.
+
+```wasm
+(module
+  (type (;0;) (func (param i32)))
+  (type (;1;) (func (param i32 i32)))
+  (import "env" "print" (func $print (type 0)))
+  (func $add (type 1) (param i32 i32)
+    local.get 1
+    local.get 0
+    i32.add
+    call $print)
+  (memory (;0;) 16)
+  (global $__stack_pointer (mut i32) (i32.const 1048576))
+  (export "memory" (memory 0))
+  (export "add" (func $add)))
+```
+
+We import a function `print` from module `env`, then declare and export a function `add` that uses it.
+We also declare and export memory with initial 16 pages, in WebAssembly each page is 64KiB for a total of 1 MiB.
+As this is "heap" memory, we don't use it in this program.
+You can learn more about the WAT format on [MDN](https://developer.mozilla.org/en-US/docs/WebAssembly/Understanding_the_text_format).
+
+To run it, we need an environment capable of using the exported function.
+Here is how you can do it in Node.js:
+
+```javascript:noderun.js
+const fs = require('fs');
+const source = fs.readFileSync('./add.wasm');
+
+WebAssembly.instantiate(source, { env: { print: (x) => console.log(x) } })
+.then((result) => {
+  const add = result.instance.exports.add;
+  add(1, 2);
+});
+
+```
+
+We pass a wrapped `console.log` for the imported `env.print`, and use the exported `add` function.
+Running with `node noderun.js`, we'll see `3` on the console output.
+
+It's a bit more convenient with Bun (written in Zig btw):
+
+```typescript:bunrun.ts
+const source = await Bun.file('add.wasm').arrayBuffer();
+const result = await WebAssembly.instantiate(source, { env: { print: (x) => console.log(x) } });
+const add = result.instance.exports.add;
+add(1, 2);
+
+```
+
+Running WASM from a server-side runtime is probably more niche since we might as well use a native binary.
+Here is an example HTML file to run in the browser:
+
+```html:index.html
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>WebAssembly test</title>
+  </head>
+  <script type="module">
+    const result = await WebAssembly.instantiateStreaming(fetch('add.wasm'), {
+      env: { print: (x) => console.log(x) },
+    });
+    const add = result.instance.exports.add;
+    add(1, 2);
+  </script>
+  <body></body>
+</html>
+```
+
+Because we currently can't put WASM in a `<script>` tag, we need to load it with `fetch`.
+We pass the promise directly to [`instantiateStreaming`](https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/instantiateStreaming_static).
+For testing, the `fetch` won't work when directly opening the HTML file with a browser.
+We need an HTTP server, we can use the one provided with Python by running `python3 -m http.server 8080`.
+Opening `http://localhost:8080`, you should see `3` in the browser console.
+
+## Strings
+
+When calling a WASM exported function, we can only pass numbers, and we'll receive a single number.
+This is not enough for most cases, so how do we use more complex data types such as strings?
+If you remember the memory from the previous section,
+turns out we simply write our input into it,
+call WASM which modifies the memory, and then read it back from JavaScript.
+
+Here is an example WASM-compatible string processing function:
+
+```zig:strings.zig
+const std = @import("std");
+
+export fn doubleString(s: [*]u8, length: usize, capacity: usize) i32 {
+    if (capacity < length * 2) {
+        return -1;
+    }
+    const left = s[0..length];
+    const right = s[length .. length * 2];
+    std.mem.copy(u8, right, left);
+    return @as(i32, @intCast(length)) * 2;
+}
+```
+
+We take a many-item pointer to `u8` which is the start of our string,
+its length and the capacity (how many bytes the caller thinks we can safely write after `s`).
+The WASM memory is an array of bytes, so `s` is under the hood just an index to this array.
+
+We return the length of the result, as `i32` to use `-1` as an error code when there isn't enough capacity.
+The result is written straight into the same memory we were given.
+
+To use this, we need to access the memory array:
+
+```javascript:noderun.js
+const fs = require('fs');
+const source = fs.readFileSync('./strings.wasm');
+
+WebAssembly.instantiate(source).then((result) => {
+  const { doubleString, memory } = result.instance.exports;
+  const input = 'Hello 🙋 World!';
+
+  const memoryView = new Uint8Array(memory.buffer);
+  const { written } = new TextEncoder().encodeInto(input, memoryView);
+
+  console.log(`written: ${written}, input.length: ${input.length}`);
+
+  const outputLength = doubleString(0, written, memoryView.byteLength);
+  // the output is in memory.buffer[0..outputLength]
+  const outputView = new Uint8Array(memory.buffer, 0, outputLength);
+  const output = new TextDecoder().decode(outputView);
+
+  console.log(output);
+});
+```
+
+As you saw in the WAT, the memory is exported as `memory`.
+This is a special [`WebAssembly.Memory`](https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/Memory) object,
+and the actual `ArrayBuffer` is accessible as `memory.buffer`.
+This is important because we can [grow](https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/Memory/grow) our memory to make the array larger,
+but this makes the old buffer detached (unusable).
+If we access it as `memory.buffer`, we're safe.
+
+We obtain a view of the buffer as a `Uint8Array` to which we can encode our string.
+This also converts from the JavaScript-native UTF-16 to UTF-8.
+We grab the number of bytes written from the [`encodeInto`](https://developer.mozilla.org/en-US/docs/Web/API/TextEncoder/encodeInto) output,
+it's not equal to `input.length` because of the encoding difference.
+
+We call our WASM function with `0` for the pointer, as we wrote the string to the memory with no offset.
+Then we can decode the result back using the returned length.
+
+Here are the results of running our program:
+
+```
+$ zig build-lib strings.zig -target wasm32-freestanding -dynamic --export=doubleString -O ReleaseFast && node noderun.js
+written: 17, input.length: 15
+Hello 🙋 World!Hello 🙋 World!
+```
+
+## JSON
+
+With the ability to pass strings, we're now just one step away from passing arbitrary objects.
+Zig's built-in JSON support makes this rather convenient.
+
+```zig:json.zig
+const std = @import("std");
+
+const walloc = std.heap.wasm_allocator;
+
+const Person = struct {
+    id: i32,
+    name: []u8,
+};
+
+export fn reverseNames(s: [*]u8, length: usize, capacity: usize) i32 {
+    const input = s[0..length];
+    const parsed = std.json.parseFromSlice([]Person, walloc, input, .{}) catch return -1;
+    defer parsed.deinit();
+    const people = parsed.value;
+
+    for (people) |x| {
+        std.mem.reverse(u8, x.name);
+    }
+
+    var output = std.ArrayList(u8).init(walloc);
+    defer output.deinit();
+    std.json.stringify(people, .{}, output.writer()) catch return -2;
+
+    const outputLength = output.items.len;
+    if (outputLength > capacity) {
+        return -3;
+    }
+    std.mem.copy(u8, s[0..outputLength], output.items);
+    return @as(i32, @intCast(outputLength));
+}
+```
+
+We use the [`std.heap.WasmAllocator`](https://ziglang.org/documentation/master/std/#A;std:heap.WasmAllocator) to get some memory for our object.
+Then after processing, we stringify our result into a `std.ArrayList` to then copy it into the memory.
+It would be nice to write it straight into `s[0..capacity]`, but I didn't find a nice way to do that.
+
+Our JavaScript looks almost the same as before, except for handling the JSON:
+
+```javascript:noderun.js
+const fs = require('fs');
+const source = fs.readFileSync('./json.wasm');
+
+WebAssembly.instantiate(source).then((result) => {
+  const { reverseNames, memory } = result.instance.exports;
+
+  function reverseNamesNice(data) {
+    const input = JSON.stringify(data);
+
+    const memoryView = new Uint8Array(memory.buffer);
+    const { written } = new TextEncoder().encodeInto(input, memoryView);
+
+    const outputLength = reverseNames(0, written, memoryView.byteLength);
+
+    const outputView = new Uint8Array(memory.buffer, 0, outputLength);
+    const output = new TextDecoder().decode(outputView);
+    return JSON.parse(output);
+  }
+
+  console.log(
+    reverseNamesNice([
+      { name: 'John', id: 1 },
+      { name: 'Jane', id: 2 },
+    ])
+  );
+});
+```
+
+Here are the results:
+
+```
+$ zig build-lib json.zig -target wasm32-freestanding -dynamic --export=reverseNames -O ReleaseFast && node noderun.js
+[ { id: 1, name: 'nhoJ' }, { id: 2, name: 'enaJ' } ]
+```
+
+## Memory
+
+Ok, so we can write our input/output straight into memory, but isn't this the same memory that the standard library is using?
+Is this safe?
+As it turns out, it's not.
+
+We can inspect the memory as follows:
+
+```javascript
+function inspectMemory() {
+  const pageSize = 2 ** 16;
+
+  console.log('pages:', memory.buffer.byteLength / pageSize);
+  const memoryView = new Uint8Array(memory.buffer);
+  const used = [];
+  for (let i = 0; i < memoryView.length; i++) {
+    if (memoryView[i]) {
+      const start = i;
+
+      while (true) {
+        const maxLookForwardBytes = 300;
+        const bytesLeft = memoryView.length - i;
+        const lookForwardBytes = Math.min(maxLookForwardBytes, bytesLeft);
+        const forwardView = new Uint8Array(memory.buffer, i, lookForwardBytes);
+        if (forwardView.every((byte) => byte === 0)) break;
+
+        i++;
+      }
+
+      used.push([start, i - start]);
+    }
+  }
+  console.log(
+    used.map(
+      ([start, length]) =>
+        `page:${Math.floor(start / pageSize)} offset:${start % pageSize} bytes:${length}`
+    ),
+    '\n'
+  );
+}
+
+inspectMemory();
+reverseNamesNice([{ name: 'Jane', id: 2 }]);
+inspectMemory();
+```
+
+It's kind of a lot—basically, we want to get the non-zero bytes, but it turns out there's a lot of them and not in perfectly contiguous blocks.
+That's why we print the blocks of non-zero bytes smoothed out a bit when there's less than 300 zeroes of gap.
+We also print their locations as page+offset, which turns out to be pretty useful:
+
+```
+$ zig build-lib json.zig -target wasm32-freestanding -dynamic --export=reverseNames -O ReleaseFast && node noderun.js
+pages: 17
+[ 'page:16 offset:0 bytes:9641' ]
+
+pages: 21
+[
+  'page:0 offset:0 bytes:24',
+  'page:15 offset:64650 bytes:10605',
+  'page:17 offset:6 bytes:43',
+  'page:18 offset:0 bytes:8',
+  'page:19 offset:4 bytes:104',
+  'page:20 offset:0 bytes:24'
+]
+```
+
+Before the `reverseNamesNice` call we have just some stuff from the standard library written on page 16,
+and after we have our result at the beginning and more pages with some non-zero bytes.
+
+We can see the initial content in the WAT:
+
+```wasm
+(data (;0;) (i32.const 1048576) "\01\00\00 (many bytes...)")
+```
+
+The number `1048576` is exactly `2**16 * 16`, which is the beginning of page 16.
+I'm not sure why this seems to move to page 15 after the call.
+
+We can use `inspectMemory` to check that freeing is working properly:
+
+```javascript
+reverseNamesNice([{ name: 'Jane', id: 2 }]);
+inspectMemory();
+reverseNamesNice([{ name: 'Jane', id: 2 }]);
+inspectMemory();
+```
+
+output:
+
+```
+pages: 21
+[
+  'page:0 offset:0 bytes:24',
+  'page:15 offset:64650 bytes:10605',
+  'page:17 offset:6 bytes:43',
+  'page:18 offset:0 bytes:8',
+  'page:19 offset:4 bytes:104',
+  'page:20 offset:0 bytes:24'
+]
+
+pages: 21
+[
+  'page:0 offset:0 bytes:24',
+  'page:15 offset:64650 bytes:10605',
+  'page:17 offset:6 bytes:43',
+  'page:18 offset:0 bytes:8',
+  'page:19 offset:4 bytes:104',
+  'page:20 offset:0 bytes:24'
+]
+```
+
+If we remove either of the `.deinit()` calls, we'll see more memory getting used up:
+
+```
+pages: 21
+[
+  'page:0 offset:0 bytes:24',
+  'page:15 offset:64650 bytes:10605',
+  'page:17 offset:6 bytes:43',
+  'page:18 offset:0 bytes:8',
+  'page:19 offset:4 bytes:104',
+  'page:20 offset:0 bytes:24'
+]
+pages: 21
+[
+  'page:0 offset:0 bytes:24',
+  'page:15 offset:64650 bytes:10605',
+  'page:17 offset:6 bytes:75',
+  'page:18 offset:0 bytes:8',
+  'page:19 offset:4 bytes:360',
+  'page:20 offset:0 bytes:88'
+]
+```
+
+Ok, but what if we need more space than the 64650 bytes before the standard library data?
+We can increase our initial memory with `--initial-memory=...`.
+Unfortunately, we are forced to write it in bytes (non-multiples of the page size 64KiB won't work),
+so I prefer to use a little [bash math](https://www.gnu.org/software/bash/manual/bash.html#Arithmetic-Expansion).
+
+```
+$ zig build-lib json.zig -target wasm32-freestanding -dynamic --export=reverseNames -O ReleaseFast --initial-memory=$((2**16 * 35)) && node noderun.js
+pages: 35
+[ 'page:16 offset:0 bytes:9641' ]
+
+pages: 39
+[
+  'page:0 offset:0 bytes:24',
+  'page:15 offset:64650 bytes:10605',
+  'page:35 offset:6 bytes:43',
+  'page:36 offset:0 bytes:8',
+  'page:37 offset:4 bytes:104',
+  'page:38 offset:0 bytes:24'
+]
+```
+
+Pages 15 and 16 are still occupied, but 17-34 are now free to use.
+
+We can also declare how much growth we need with `--max-memory=...`, there is a limit and if we don't set it, the environment will.
+
+If we'd like to decide this from JavaScript instead, we can use `--import-memory`.
+This produces `(import "env" "memory" (memory (;0;) 17))` in the WAT, the `17` is how many pages it needs at minimum.
+We can use it like this:
+
+```javascript
+const memory = new WebAssembly.Memory({ initial: 35, maximum: 100 });
+
+WebAssembly.instantiate(source, { env: { memory } }).then((result) => {
+  /* here we can use memory just as before, without getting it from exports */
+});
+```
+
+If we wanted to be super proper and organized, we'd probably export alloc and dealloc functions from Zig and use that to get our input/output space.
+
+## Workers
+
+We can run our WASM from a web worker the same way as from the main script.
+There is a bit of a trap, if we do this:
+
+```javascript
+// worker.js
+const result = await WebAssembly.instantiateStreaming(fetch('foo.wasm'));
+
+/* no difference with `onmesssage =` */
+addEventListener('message', (event) => {
+  /*...*/
+});
+
+// index.html
+const worker = new Worker('worker.js', { type: 'module' });
+worker.postMessage('foo');
+```
+
+it will not work, I'm not sure precisely but it makes sense that the `addEventListener` call is too "slow" for the message.
+Instead, we can `await` in the callback:
+
+```javascript:worker.js
+const promise = WebAssembly.instantiateStreaming(fetch('foo.wasm'));
+
+addEventListener('message', async (event) => {
+  const result = await promise;
+  // ...
+});
+```
+
+If you want a new instance every time (e.g. you rarely call the WASM and don't want to bother freeing the memory),
+you can separate the compilation step:
+
+```javascript:worker.js
+const promise = WebAssembly.compileStreaming(fetch('foo.wasm'));
+
+addEventListener('message', async (event) => {
+  const instance = await WebAssembly.instantiate(await promise);
+  // ...
+});
+```
+
+Note that this is an overload of `instantiate` (see [MDN](https://developer.mozilla.org/en-US/docs/WebAssembly/JavaScript_interface/instantiate_static)),
+and `instance` is already what we previously got from `result.instance`.
