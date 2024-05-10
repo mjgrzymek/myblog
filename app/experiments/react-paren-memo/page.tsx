@@ -2,7 +2,7 @@
 import React, { useState, memo } from 'react';
 import { Paren, exampleTree } from '../paren-generator';
 
-function HasParen({ node }: { node: Paren }) {
+const HasParenMemo = memo(function HasParen({ node }: { node: Paren }) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -15,7 +15,7 @@ function HasParen({ node }: { node: Paren }) {
         ({' '}
       </span>
       {node.map((n, index) => (
-        <HasParen key={index} node={n} />
+        <HasParenMemo key={index} node={n} />
       ))}
       <span
         onMouseEnter={() => setHovered(true)}
@@ -27,12 +27,12 @@ function HasParen({ node }: { node: Paren }) {
       </span>
     </span>
   );
-}
+});
 
 export default function Content() {
   return (
     <main className="">
-      <HasParen node={exampleTree} />
+      <HasParenMemo node={exampleTree} />
     </main>
   );
 }
