@@ -7,11 +7,11 @@ const siteMetadata = {
   language: 'en-us',
   theme: 'system', // system, dark or light
   siteUrl: 'https://blog.mjgrzymek.com/',
-  siteRepo: 'https://github.com/MichalGrzymek/myblog',
+  siteRepo: 'https://github.com/mjgrzymek/myblog',
   siteLogo: '/static/images/logo.png',
   socialBanner: '/static/images/twitter-card.png',
   email: 'mjgrzymek@gmail.com',
-  github: 'https://github.com/MichalGrzymek',
+  github: 'https://github.com/mjgrzymek',
   twitter: 'https://twitter.com/MJGrzymek',
   //facebook: 'https://facebook.com',
   //youtube: 'https://youtube.com',

@@ -1,0 +1,622 @@
+---
+title: 'Fun with CSS :has() - highlighting parentheses, variable bindings, and more'
+date: '2024-04-21'
+tags: ['tailwind', 'css', 'web']
+draft: false
+summary: Cool examples of CSS :has() and Tailwind
+images: ['static/images/tailwind-paren-component.png']
+---
+
+An old saying goes, "if you can do it with CSS, don't do it with JavaScript".
+With the new additions of `:has()` and `:not()` in CSS, I decided to test this theory.
+
+My new thing is a "playground" for the lambda calculus (try it out at [lambda-playground.com](https://lambda-playground.com/)!).
+The lambda calculus is a minimal language built of only single-argument anonymous functions/lambdas/arrow functions.
+
+I wanted to add some cool highlighting, for example, you can hover to highlight matching parentheses
+
+<div className="flex scale-150 justify-center">
+  ![x => x(x))(y => y), one of the parentheses is hovered with a mouse pointer and it and the matching one are red](/static/images/lambda-has/parens-js.webp)
+</div>
+
+Hovering an arrow highlights the body of the function in red and the argument in blue.
+
+<div className="flex scale-150 justify-center">
+  ![x => x(x))(y => y), the first arrow is hovered with a mouse pointer, x(x) has a red outline and y => y has a blue outline](/static/images/lambda-has/bodyjs.webp)
+</div>
+
+Additionally, if this function was "reduced" (called),
+it highlights where the body and arguments went in the next line.
+
+<div className="flex scale-150 justify-center">
+  ![x => x(x))(y => y), the first arrow is hovered with a mouse pointer, x(x) has a red outline and y => y has a blue outline. On the next line, a red outline around (y => y)(y => y), each (y => y) as a blue outline](/static/images/lambda-has/twoline-js.webp)
+</div>
+
+The most technically complex feature is that hovering a variable highlights all occurrences of that variable.
+
+<div className="flex scale-150 justify-center">
+  ![JavaScript expression where some of the letters x are green and there is a mouse pointer hovering one of them: x => y => green x => (y => hovered green x)(x => x(y))(green x)](/static/images/lambda-has/vars-js.webp)
+</div>
+
+Note that shadowed and shadowing variables are not highlighted.
+
+The use of JavaScript is minimal.
+Different variable names have different meanings, so we have to generate separate rules for each variable name.
+For example, the above has two JavaScript-generated rules, one involving the classes `var-x` and `abstr-x`
+([abstraction](https://en.wikipedia.org/wiki/Lambda_calculus#lambdaAbstr) of x, that is `(x => ...)`),
+the other `var-y` and `abstr-y`.
+Everything else is static CSS, in fact, everything else is tailwind.
+
+<TOCInline toc={props.toc} />
+
+# What's has
+
+`:has()` is a new pseudoclass in CSS (in Firefox just since December 2023!).
+It allows to reverse the usual combinators.
+For example, `p div` will select divs that are descendants of paragraphs, and `div:has(p)` will select divs that have paragraphs as descendants.
+Similarly, we can use `div:has(>p)` to select divs that have a paragraph as a child.
+
+A motivating example of `:has()` is as follows.
+Imagine we have cards with checkboxes in them, and we want to highlight a card when the checkbox inside is checked.
+Previously, we would have to use JavaScript, but with `:has()` we can do it in CSS.
+
+```css
+.card:has(:checked) {
+  outline: 4px solid blue;
+}
+```
+
+```jsx
+<div className="card">
+  Fooify
+  <input type="checkbox" />
+</div>
+```
+
+{<div className="flex justify-center">
+
+  <div className="flex items-center gap-2 bg-gray-600 p-4 outline-4 outline-blue-500 has-[:checked]:outline">
+    Fooify
+    <input type="checkbox" />
+  </div>
+</div>}
+
+# :has() hacking
+
+The true power of :has() lies in the fact that we don't have to apply it to the element we are targeting.
+We can use it together with combinators,
+and target an element that is in some relation to an element that `:has()` something.
+
+Here is a simple example.
+Let's say we want to highlight an element when another element is hovered.
+There are some cases where it works without `:has()`, for example using the next sibling combinator.
+
+```css
+.foo:hover ~ .bar {
+  background-color: red;
+}
+```
+
+{<div className="flex justify-center gap-6">
+
+  <div className="bg-gray-500 p-6">{'.foo'}</div>
+  <div className="bg-gray-500 p-6 [:hover~&]:bg-red-600">{'.bar'}</div>
+</div>}
+
+But if we want to reverse this, or if the elements are not direct siblings, previously we'd have to use JavaScript hover state handling.
+
+Instead, we can use a trick to detect the presence of `.foo:hover` anywhere in the document
+
+```css
+body:has(.foo:hover) .bar {
+  background-color: blue;
+}
+
+body:has(.bar:hover) .foo {
+  background-color: red;
+}
+```
+
+The meaning of the first rule can be read as follows: select instances of `.bar` that are descendants of a `body` that has a hovered `.foo` as a descendant.
+Since everything is always a descendant of `body`, this translates to "select `.bar` when a `.foo` is hovered",
+no matter how far away in the document they are.
+
+{<div className="flex justify-center gap-6">
+
+<div className="bg-gray-700 p-2">
+  {'div'}
+  <div className="foo bg-gray-500 p-2 [body:has(.bar:hover)_&]:bg-red-600">{'.foo'}</div>
+</div>
+
+<div className="bg-gray-700 p-2">
+  {'div'}
+  <div className="bar bg-gray-500 p-2 [body:has(.foo:hover)_&]:bg-blue-600">{'.bar'}</div>
+</div>
+
+</div>}
+
+## Tailwind
+
+Tailwind has a [built-in `has` feature](https://tailwindcss.com/docs/hover-focus-and-other-states#styling-based-on-descendants), but it's quite limited.
+This will possibly improve in [v4](https://tailwindcss.com/blog/tailwindcss-v4-alpha),
+but for now,
+we can use the [arbitrary variants feature](https://tailwindcss.com/docs/hover-focus-and-other-states#using-arbitrary-variants)
+which allows writing any CSS selector in brackets.
+
+The code for the example above is:
+
+```jsx
+<div className="bg-gray-700 p-2">
+  div
+  <div className="foo bg-gray-500 p-2 [body:has(.bar:hover)_&]:bg-red-600">.foo</div>
+</div>
+
+<div className="bg-gray-700 p-2">
+  div
+  <div className="bar bg-gray-500 p-2 [body:has(.foo:hover)_&]:bg-blue-600">.bar</div>
+</div>
+```
+
+There are only two weird things: you can't use whitespace because it would mess up the class name, so we use `_` instead.
+Also, the `&` stands for "this class". It gets compiled to the whole class name, for example, the rule that you get for `[body:has(.bar:hover)_&]:bg-red-600` is
+
+```css
+body:has(.bar:hover) .\[body\:has\(\.bar\:hover\)_\&\]\:bg-red-600 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(220 38 38 / var(--tw-bg-opacity));
+}
+```
+
+Note that to do complex stuff we still need normal class names like `.foo` and `.bar`, but we can seamlessly mix them with the special tailwind classes.
+
+This is actually pretty fun, they should make a tailwind where there are no special aliases but you just write the selector and the style inline, like
+
+```jsx
+<div className="[&:hover]:[background-color:red;text-decoration:underline;]">
+  this is a great idea MJ!
+</div>
+```
+
+Fun note: tailwind only checks that `&` appears in the brackets, but not that the target of the rule is the `&`, so you can e.g. do this
+
+```jsx
+<p className="[body:has(&:hover)_p]:underline">- hover me</p>
+```
+
+<p className="p-3 [body:has(&:hover)_p]:underline">{'- hover me'}</p>
+
+# Magic parentheses component
+
+Say we want to have a component that wraps its children in parentheses,
+and highlights the parentheses on hover.
+
+The classical approach would be to use JavaScript hover events
+
+```jsx
+function Paren({ children }) {
+  const [hovered, setHovered] = useState(false);
+  const onHover = () => setHovered(true);
+  const onLeave = () => setHovered(false);
+
+  return (
+    <>
+      <span className={hovered ? 'bg-red-600' : ''} onMouseEnter={onHover} onMouseLeave={onLeave}>
+        (
+      </span>
+      {children}
+      <span className={hovered ? 'bg-red-600' : ''} onMouseEnter={onHover} onMouseLeave={onLeave}>
+        )
+      </span>
+    </>
+  );
+}
+//...
+<Paren>
+  <Paren>a</Paren>
+  <Paren>b</Paren>
+</Paren>;
+```
+
+<div className="flex justify-center font-mono text-xl">
+  <StateParen>
+    <StateParen>{'a'}</StateParen>
+    <StateParen>{'b'}</StateParen>
+  </StateParen>
+</div>
+
+This works perfectly well, but it feels wrong.
+I hate how such an innocent action as hovering makes JavaScript run on the user's computer.
+Also, the imperativeness of it feels off.
+I'm not sure how it could be better without baking React into the browser,
+but why am I, as a Web API consumer, managing the state of whether something is hovered?
+
+Fortunately, with `:has()`, we can do this in just CSS.
+
+```jsx
+function Paren({ children }) {
+  return (
+    <span className="paren-container">
+      <span className="paren [.paren-container:has(>.paren:hover)>&]:bg-red-600">(</span>
+      {children}
+      <span className="paren [.paren-container:has(>.paren:hover)>&]:bg-red-600">)</span>
+    </span>
+  );
+}
+```
+
+We change the color whenever our parent is a `.paren-container` and as a hovered `.paren` as a child.
+
+We can still make this a bit ~~code golfier~~ less verbose.
+Since we don't have state anymore, we don't need it to be a component, a normal function will do.
+Also, remember that `&` stands for "this class name", not "this element".
+So as long as we're using the same class for both parentheses, we can use `&:hover` as the argument to `:has()`.
+
+Also, it may or may not help the CSS engine, but we don't really need to limit the parent to `.paren-container`.
+
+```jsx
+function paren(children) {
+  return (
+    <span>
+      <span className="[:has(>&:hover)>&]:bg-red-600">(</span>
+      {children}
+      <span className="[:has(>&:hover)>&]:bg-red-600">)</span>
+    </span>
+  );
+}
+// ...
+paren(paren('cool!'));
+```
+
+<span className="flex justify-center font-mono text-xl">
+  <span className="[:has(>&:hover)>&]:bg-red-600">(</span>
+  <span>
+    <span className="[:has(>&:hover)>&]:bg-red-600">(</span>
+    {'cool!'}
+    <span className="[:has(>&:hover)>&]:bg-red-600">)</span>
+  </span>
+  <span className="[:has(>&:hover)>&]:bg-red-600">)</span>
+</span>
+
+# Variable bindings in CSS
+
+For this,
+we need to start with HTML that contains all the logical information needed for highlighting.
+The most obvious thing works - each abstraction is wrapped in a span with an `.abstr-?` class,
+and each variable in a span with a `.var-?` class.
+Introductions of a variable also have `.bind` so they can be underlined.
+
+For example, the HTML for `x => (y => y)x` would be
+
+```html
+<span class="abstr-x">
+  <span class="var-x bind">x</span>
+  =>
+  <span class="abstr-y">
+    (
+    <span class="var-y bind">y</span>
+    =>
+    <span class="var-y">y</span>
+    )
+  </span>
+  <span class="var-x">x</span>
+</span>
+```
+
+As mentioned, for variables we need a way to generate CSS rules from JavaScript.
+I spent a lot of time looking through possibilities like [styled components](https://styled-components.com/),
+but nothing was quite what I wanted.
+
+Just as I was about to pull up MDN for the API,
+I found out that the perfect solution was right there baked into NextJS.
+With [Styled JSX](https://github.com/vercel/styled-jsx) you simply add a `<style jsx global>`
+into your JSX and it efficiently adds the style with automatic dedpuing.
+(Without `global`, it also scopes it to the parent element)
+
+This is my current `<style>` generator
+
+```jsx
+function abstractionStyle(variableName: string) {
+  const x = variableName;
+  return (
+    <style jsx global>
+      {`
+        .abstr-${x}:is(:has(.var-${x}:hover):not(:has(.abstr-${x}:hover)),:has(>.abstraction-handle:hover))
+          .var-${x}:not(.abstr-${x}:not(:hover) .var-${x}) {
+          color: rgb(101 163 13);
+          &.bind {
+            border-bottom: 1px solid rgb(101 163 13);
+          }
+        }
+      `}
+    </style>
+  );
+}
+```
+
+The `rbg(101 163 13)` is tailwind's `lime-600`.
+Apparently, you can [set it up to work with tailwind @apply](https://github.com/vercel/styled-jsx?tab=readme-ov-file#css-preprocessing-via-plugins),
+but I didn't think it was worth it.
+
+(I kinda wish Next added all this stuff for Tailwind automatically,
+like imagine not using the [prettier plugin](https://tailwindcss.com/blog/automatic-class-sorting-with-prettier).)
+
+Above, the `.abstraction-handle` part is for handling hover on `=>`,
+and the `.bind` part is just for underlining the binding/first occurrence.
+Also, let's assume that the variable name is `"x"`, simplifying it to the following
+
+```css
+.abstr-x:has(.var-x:hover):not(:has(.abstr-x:hover))
+  .var-x:not(.abstr-x:not(:hover) .var-x) {
+  color: rgb(101 163 13);
+}
+```
+
+<div className="flex justify-center">
+  <span className="abstr-x font-mono text-xl">
+    <style>
+      {`.abstr-x:has(.var-x:hover):not(:has(.abstr-x:hover))
+          .var-x:not(.abstr-x:not(:hover) .var-x) {
+          color: rgb(101 163 13);
+        }
+      .abstr-x:has(.var-x:hover):not(:has(.abstr-x:hover))
+        .var-x:not(.abstr-x:not(:hover) .var-x).bind{
+          border-bottom: 1px solid rgb(101 163 13);
+        }
+        `}
+    </style>
+    <span className="var-x bind">{'x'}</span>
+    {' => ('}
+    <span className="abstr-x">
+      <span className="var-x bind">{'x'}</span>
+      {' => ('}
+      <span className="abstr-x">
+        <span className="var-x bind">{'x'}</span>
+        {' => '}
+        <span className="var-x">{'x'}</span>
+      </span>
+      {')'}
+      <span className="var-x">{'x'}</span>
+    </span>
+    {')'}
+    <span className="var-x">{'x'}</span>
+  </span>
+</div>
+
+The core of the logic is
+
+```css
+.abstr-x:has(.var-x:hover) .var-x {...}
+```
+
+We want to highlight all `.var-x` that belong to (are bound by) the abstraction that binds our hovered `.var-x`.
+However, this alone will highlight all `.var-x` inside any `.abstr-x`.
+
+First, we need to ensure that the `.abstr-x` will be the innermost one possible.
+That is, it will not contain another `.abstr-x` with a hovered `.var-x`.
+This would suggest adding a condition `:not(:has(.abstr-x:has(.var-x:hover)))`.
+However, there is a limitation with `:has()`, in that you can't nest it inside itself.
+
+Instead, we can use the fact that our spans with `.abstr-x` contain all the variables they bind as descendants.
+So if one of those variables is hovered, the span is also hovered.
+Therefore, it suffices to add the condition `:not(:has(.abstr-x:hover))`, resulting in
+
+```css
+.abstr-x:has(.var-x:hover):not(:has(.abstr-x:hover)) .var-x {...}
+```
+
+Now the only possible `.abstr-x` for the left part is the correct one.
+However, there is still a problem, as not all `.var-x` that are descendants of it are bound by it.
+If the variable `x` is shadowed, we want to exclude that.
+
+We can use the same property as before - the shadowing `.abstr-x` will not be hovered.
+So we want only `.var-x` that are not descendants of a non-hovered `.abstr-x`.
+
+This is a little quirky,
+but since `.var-x` that are descendants of a non-hovered `.abstr-x` are selected by `.abstr-x:not(:hover) .var-x`,
+the ones that are not are `.var-x:not(.abstr-x:not(:hover) .var-x)`.
+It would also work as `.var-x:not(.abstr-x:not(:hover) *)`,
+but being more specific can't hurt.
+
+We end up with
+
+```css
+.abstr-x:has(.var-x:hover):not(:has(.abstr-x:hover))
+  .var-x:not(.abstr-x:not(:hover) .var-x) {...}
+```
+
+Having excluded shadowed and shadowing variables,
+it now correctly highlights just the instances of the hovered variable.
+
+# Other highlighting
+
+CSS is famous for being awkwardly separate from HTML.
+This is somewhat fixed by Tailwind, but then when we do weird stuff like here it breaks again.
+
+For example, in my app, I want to highlight things that are some deterministic path away from some other thing.
+Now, a combination of `:has()`, `+` ([next-sibling combinator](https://developer.mozilla.org/en-US/docs/Web/CSS/Next-sibling_combinator))
+and `>` ([child combinator](https://developer.mozilla.org/en-US/docs/Web/CSS/Child_combinator))
+makes this usually possible.
+
+But since I have so many different highlightings, and each one needs its own span with a class,
+the paths can get pretty long.
+This leads to wonderful creatures roaming in the JSX, like this one
+
+```jsx
+<span className="outline-2 outline-sky-600 [.application-container:has(>.paren-container>.result-container-outer>.result-container-inner>.abstraction-container>.abstraction-handle:hover)>.paren-container>&]:outline">
+  {inBody}
+</span>
+```
+
+(this is for the blue outline on the argument)
+
+If you're looking for new web framework ideas, I feel like this could be made easier somehow.
+
+Other things are still quite pleasant, for example, the next line highlightings are just this
+
+```js
+'[.output-row-container:has(.used-handle:hover)+.output-row-container_&]:outline outline-2 outline-sky-600';
+```
+
+In words, draw the outline when this is a descendant of a row whose immediate previous sibling has a hovered `=>`
+("handle").
+
+[Tanstack virtual](https://tanstack.com/virtual/latest)'s famous "headless" feature came in handy here,
+I tried [virtuoso](https://virtuoso.dev/) first, but it adds its own divs which would require a workaround.
+
+# Performance
+
+<div className="flex justify-center">
+  ![Twitter conversation:
+  madison is skating says: day one of my zero waste journey! used my new css features to make my highlighting 🤗✨
+  (the "new css features" and "highlighting" are obviously edited in)
+  Raven Rimmer replies: Is it...good?
+  madison is skating @madibskatin replies: no ❤️](/static/images/lambda-has/zero-waste-highlight.webp)
+</div>
+
+So we implemented some complex highlighting using only CSS.
+But was it worth it?
+
+My app works with no problems.
+But this is after adding virtualization.
+
+I had an interesting experience before that, I had thousands of highlighted spans in a single scrollable div.
+And there was a massive lag when hovering things.
+But the lag was only present on Chrome, Firefox worked instantly.
+
+So I pulled out the profiler,
+I even downloaded [Edge dev channel](https://www.microsoft.com/en-us/edge/download/insider)
+for its [selector stats](https://learn.microsoft.com/en-us/microsoft-edge/devtools-guide-chromium/evaluate-performance/selector-stats)
+feature which lets you see how much time recalculating each rule took (thank you Microsoft).
+
+It turned out that style calculation was fast,
+the thing taking so much time was layout calculations,
+which I didn't think should be affected by colors and outlines.
+I ran into a similar problem while doing tests for this post.
+
+## Experiments
+
+I decided to run some experiments comparing a classic React approach to these `:has()` tricks.
+I tested the highlighted parentheses component, it's simple and has obvious implementations on both sides.
+
+Via the correspondence between ordered trees and parentheses (`const repr = node => '(' + node.children.map(repr).join('') + ')'`),
+the test is a tree generated by starting with a root and adding a child to a random node in the tree 30'000 times.
+This simple method has a known limitation in that the generated trees are wide and not deep.
+However, since we're converting this into a tree of components or spans which React has to recursively walk through,
+we can't have too much depth before we hit the recursion limit.
+
+I used two variants for the `:has()` version to test whether putting `.paren-container` on the outer span improves things.
+Also,
+the most naive implementation where the React component version is recursive is somewhat unfair to React,
+as it by default rerenders all the children when the state updates.
+For this reason, I added a version with [React.memo](https://react.dev/reference/react/memo),
+and another where the component takes a `children` prop, which also avoids unnecessary rerenders.
+
+You can check the running examples [here](https://blog.mjgrzymek.com/experiments) and the code [on the blog's github](https://github.com/mjgrzymek/myblog/tree/main/app/experiments).
+
+I ran the tests with the Chrome DevTools performance tool,
+by moving my mouse around semi-randomly at the top, middle, and bottom of the page.
+Then I looked at the timeline and selected the longest task for each test.
+
+## Results
+
+### :has()
+
+| test             | total | Recalculate Style | Layout | Pre-Paint | Recalculate Style\* | Paint | Layerize |
+| ---------------- | ----- | ----------------- | ------ | --------- | ------------------- | ----- | -------- |
+| has              | 605ms | 212ms             | 63ms   | 88ms      | 206ms               | 23ms  | 7ms      |
+| has + .container | 653ms | 232ms             | 62ms   | 86ms      | 218ms\*\*           | 44ms  | 15ms     |
+
+- \* - it might seem maybe Chrome DevTools was unkind here and bundled two hovers into one "task".
+  But I tried doing it very slowly in another test and got a 554ms total with only 1 "Recalculate Style",
+  where every step was just a bit slower.
+- \*\* - has a "Forced reflow" annotation
+
+The fact that the version with the container class was slower is probably just noise,
+nevertheless, it's noise in the direction of it not being faster.
+
+### React
+
+| test                | total | Function Call\* | Layout | Pre-Paint | Paint | Layerize |
+| ------------------- | ----- | --------------- | ------ | --------- | ----- | -------- |
+| React               | 724ms | 383ms           | 118ms  | 127ms     | 59ms  | 31ms     |
+| React-memo\*\*      | 560ms | 1ms             | 284ms  | 155ms     | 73ms  | 32ms     |
+| React-children prop | 466ms | 1ms             | 187ms  | 150ms     | 88ms  | 35ms     |
+
+- \* this means JavaScript. It wasn't included in the same "task" on the UI but it counts for the highlighting delay.
+  There is also the mouseover event which DevTools counts as a separate task, but it's only around 3ms.
+- \*\* has "Dropped frame" labels above it and a gap in the subtasks timeline.
+
+### Comparison
+
+Overall, the ranking is unoptimized React < CSS < optimized React.
+Zooming in, we can see that the unique steps, that is recalculating styles for CSS and JavaScript for React,
+take around 400ms in CSS and unoptimized React, and are negligible in optimized React.
+
+The common steps seem to take more time for the React variants,
+this could be a thing where it's easier when the DOM isn't modified,
+or it could be some form of noise, in which case optimized React wins even more.
+
+I'm rather surprised by this.
+With a declarative solution like CSS,
+there is definitely more opportunity for optimizations,
+versus JavaScript where the engine has to actually do all the steps you specify.
+
+But declarative programming also has a known problem where you're surrendering yourself to the implementor,
+and they might not have optimized for your usage.
+This seems to be the case here,
+so currently I can't recommend weird CSS tricks over normal React coding if you're looking for performance 😔
+
+## The Firefox moment
+
+If you open the tests in Firefox,
+everything is instant.
+There is a 500ms lag in the outermost parenthesis in the no memo version (where it has to rerender the whole thing),
+but otherwise, it just works perfectly.
+I thought Firefox is just quality control for Chromium,
+where they prove the features make sense by independently reimplementing them.
+I was so wrong, thank you Mozilla.
+
+I'm still not sure if this is a problem in Chromium or one of those "optimizing for different things" cases,
+but either way,
+points to Firefox on this one.
+
+# Can we go deeper?
+
+A natural question arises, can we use the new CSS features to create something much more complex?
+Say, solving an NP-complete problem with CSS (thus lagging everyone's browsers)?
+Alas, it seems that the committee has put care to prevent such fun.
+
+We can consider the DOM as a tree where each node has flags, starting with attributes, classes, IDs, types, and argument-less pseudoclasses (like `:hover`).
+
+Then we have ways to combine flags into a new flag with combinators: ` `, `>`, `+`, `~`, `,`,
+and pseudoclasses that take arguments like `:nth-hild()`, `:has()`, and `:not()`.
+All of them are easy to compute in linear time (in the size of the DOM), assuming we've already computed the arguments.
+
+Still, it's quite impressive how instant the update can be when hovering something, which is a change of the input in this model.
+It could be an interesting exercise to create a case where changing the hover state forces many linear passes over the DOM.
+
+# Closing thoughts
+
+That's all for today. I want to write about other aspects of lambda-playground, like the TeX mode (which Looks Just Like Latex™),
+and any other fascinating topics that come to mind.
+
+I don't have a newsletter, so if you want to see those, I guess you have no choice but to follow me on X/Twitter [@MJGrzymek](https://twitter.com/MJGrzymek).
+
+{/*<div>
+# for thumbnail
+
+```jsx
+// Tailwind parentheses component
+function P({ children }) {
+  return <span>
+    <span className="[:has(>&:hover)>&]:bg-red-600">(</span>
+    {children}
+    <span className="[:has(>&:hover)>&]:bg-red-600">)</span>
+  </span>;
+}
+<P> hover <P> <P>to</P> highlight </P> </P>;
+```
+
+{<div className="font-mono text-xl flex justify-center cursor-default -mt-5"> <StateParen> hover <StateParen><StateParen>to</StateParen> highlight </StateParen> </StateParen> </div>}
+</div>
+*/}

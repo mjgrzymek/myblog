@@ -19,6 +19,7 @@ export default async function Experiments() {
           </li>
         ))}
       </ul>
+      <p>The pages look different at the end, but all the parentheses seem to be there. 🤔</p>
     </main>
   );
 }

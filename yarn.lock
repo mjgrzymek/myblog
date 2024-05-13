@@ -4122,6 +4122,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"caniuse-lite@npm:latest":
+  version: 1.0.30001617
+  resolution: "caniuse-lite@npm:1.0.30001617"
+  checksum: a03bfd6ed474d14378f1b93bf90e9b0031e56a813cf42b364e5a86881ecdcdfdd58bf94c56febb0e4128c5ab57cc0a760ab7f3ef7ce0c1ead1af78a8e806375e
+  languageName: node
+  linkType: hard
+
 "ccount@npm:^2.0.0":
   version: 2.0.1
   resolution: "ccount@npm:2.0.1"
@@ -10978,6 +10985,7 @@ __metadata:
     "@typescript-eslint/parser": ^6.1.0
     "@vercel/analytics": ^1.2.2
     autoprefixer: ^10.4.13
+    caniuse-lite: latest
     contentlayer: 0.3.4
     cross-env: ^7.0.3
     esbuild: 0.18.11
